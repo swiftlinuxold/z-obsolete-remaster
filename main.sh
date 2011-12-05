@@ -15,9 +15,9 @@ DIR_DEVELOP=/home/$UNAME/develop
 # Obtain MintConstructor, the package for creating the Linux Mint ISO file
 apt-get install -y mintconstructor 
 
-file1=$DIR_DEVELOP/remaster/usr_lib_linuxmint_mintConstructor/mintConstructor.py
-file2=/usr/lib/linuxmint/mintConstructor/mintConstructor.py
-cp file1 file2
-chmod a+x file2
+FILE1=$DIR_DEVELOP/remaster/usr_lib_linuxmint_mintConstructor/mintConstructor.py
+FILE2=/usr/lib/linuxmint/mintConstructor/mintConstructor.py
+cp $FILE1 $FILE2
+chmod a+x $FILE2
 
-python file2
+python $FILE2
