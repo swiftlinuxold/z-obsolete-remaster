@@ -68,19 +68,26 @@ class Reconstructor:
         menuName = _("Live Remastering Tool")
         menuComment = _("Make changes to an ISO or a live media")
 
+		# DIALOG BOX 1: Select existing project (provide directory) 
+		# or new project (provide directory or leave blank to use CD drive)
+		# Triggered by self.wTree = gtk.glade.XML(self.gladefile, domain='reconstructor')
+		
         # setup glade widget tree
-        print ""
+        print "Calling glade"
         print "Setting up the GUI..."
         self.wTree = gtk.glade.XML(self.gladefile, domain='reconstructor')
         print ""
-        print ""
+        print "Finished calling glade"
+        
 
 
         # check for user
+        print "Check for user" # Proceeds without DIALOG BOX 1 input
         if os.getuid() != 0 :
             self.wTree.get_widget("windowMain").hide()
 
         # create signal dictionary and connect
+        print "Create signal dictionary and connect" # Proceeds without DIALOG BOX 1 input
         dic = { "on_buttonNext_clicked" : self.on_buttonNext_clicked,
             "on_buttonBack_clicked" : self.on_buttonBack_clicked,
             "on_buttonBrowseWorkingDir_clicked" : self.on_buttonBrowseWorkingDir_clicked,
@@ -95,21 +102,26 @@ class Reconstructor:
         self.wTree.signal_autoconnect(dic)
 
         # set icons & logo
+        print "Set icons and logo" # Proceeds without DIALOG BOX 1 input
         self.wTree.get_widget("windowMain").set_icon_from_file(self.iconFile)
         self.wTree.get_widget("imageLogo").set_from_file(self.iconFile)
 
-        # check for existing mount dir
+        # check for existing mount dir # Proceeds without DIALOG BOX 1 input
+        print "Check for existing mount directory" 
         if os.path.exists(self.mountDir) == False:
             print _('INFO: Creating mount directory...')
             os.makedirs(self.mountDir)
 
         # set app title
+        print "Set app title" # Proceeds without DIALOG BOX 1 input
         self.wTree.get_widget("windowMain").set_title(self.appName)
 
         # hide back button initially
+        print "Hide back button initially" # Proceeds without DIALOG BOX 1 input
         self.wTree.get_widget("buttonBack").hide()
         
         # set values
+        print "Set values" # Proceeds without DIALOG BOX 1 input
         if os.path.exists(os.environ['HOME'] + "/.linuxmint/mintConstructor/currentProject"):
             currentProject = commands.getoutput("cat ~/.linuxmint/mintConstructor/currentProject")
         else:
@@ -121,36 +133,51 @@ class Reconstructor:
             
         self.wTree.get_widget("entryWorkingDir").set_text(currentProject)        
         self.wTree.get_widget("entryLiveCdDescription").set_text(iso_name)                         
+        print "Completed def __init__(self)" # Proceeds without DIALOG BOX 1 input
 
     def checkCustomDir(self):
+        print "Begin checkCustomDir"
         if self.customDir == "":
             return False
         else:
             if os.path.exists(self.customDir) == False:
                 os.makedirs(self.customDir)
             return True
+        print "Completed checkCustomDir"
 
     def setPage(self, pageNum):
+        print "Begin setPage"
         self.wTree.get_widget("notebookWizard").set_current_page(pageNum)
+        print "Completed setPage"
 
     def setBusyCursor(self):
+        print "Begin setBusyCursor"
         self.working = True
         self.wTree.get_widget("windowMain").window.set_cursor(gtk.gdk.Cursor(gtk.gdk.WATCH))
+        print "Completed setBusyCursor"
 
     def setDefaultCursor(self):
+        print "Begin setDefaultCursor"
         self.working = False
         self.wTree.get_widget("windowMain").window.set_cursor(None)
+        print "Completed setDefaultCursor"
 
     def showWorking(self):
+        print "Begin showWorking"
         self.workingDlg = gtk.Dialog(title="Working")
         self.workingDlg.set_modal(True)
         self.workingDlg.show()
+        print "Completed showWorking"
 
     def hideWorking(self):
+        print "Begin hideWorking"
         self.workingDlg.hide()
+        print "Completed hideworking"
 
     def checkWorkingDir(self):
         # check for existing directories; if not warn...
+        print "Begin checkWorkingDir" 
+        # Here or beyond is the "Continue?" dialog box.
         remasterExists = None
         rootExists = None
         if os.path.exists(os.path.join(self.customDir, "remaster")) == False:
@@ -200,8 +227,10 @@ class Reconstructor:
                 warnDlg.destroy()
 
         return workingDirOk
+        print "Completed checkWorkingDir"
 
     def checkPage(self, pageNum):
+        print "Begin checkPage"
         if pageNum == self.pageLiveSetup:
             # setup
             self.saveSetupInfo()
@@ -323,8 +352,10 @@ class Reconstructor:
             print _("Exiting...")
             gtk.main_quit()
             sys.exit(0)
+        print "Finished checkPage"
 
     def checkEnableBurnIso(self):
+        print "checkEnableBurnIso"
         # show burn iso button if nautilus-cd-burner exists
         if commands.getoutput('which nautilus-cd-burner') != '':
             # make sure iso isn't blank
@@ -334,9 +365,11 @@ class Reconstructor:
                 self.wTree.get_widget("buttonBurnIso").hide()
         else:
             self.wTree.get_widget("buttonBurnIso").hide()
+        print "checkEnableBurnIso"
 
 
     def exitApp(self):
+        print exitApp
         gtk.main_quit()
         sys.exit(0)
 
