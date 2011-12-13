@@ -73,21 +73,20 @@ class Reconstructor:
 		# Triggered by self.wTree = gtk.glade.XML(self.gladefile, domain='reconstructor')
 		
         # setup glade widget tree
-        print "Calling glade"
+        print ""
         print "Setting up the GUI..."
         self.wTree = gtk.glade.XML(self.gladefile, domain='reconstructor')
         print ""
-        print "Finished calling glade"
+        print ""
         
-
-
         # check for user
-        print "Check for user" # Proceeds without DIALOG BOX 1 input
+        print "Check for user"
         if os.getuid() != 0 :
             self.wTree.get_widget("windowMain").hide()
 
         # create signal dictionary and connect
-        print "Create signal dictionary and connect" # Proceeds without DIALOG BOX 1 input
+        # Calls various functions in response to various events
+        print "Create signal dictionary and connect"
         dic = { "on_buttonNext_clicked" : self.on_buttonNext_clicked,
             "on_buttonBack_clicked" : self.on_buttonBack_clicked,
             "on_buttonBrowseWorkingDir_clicked" : self.on_buttonBrowseWorkingDir_clicked,
@@ -102,26 +101,26 @@ class Reconstructor:
         self.wTree.signal_autoconnect(dic)
 
         # set icons & logo
-        print "Set icons and logo" # Proceeds without DIALOG BOX 1 input
+        print "Set icons and logo" 
         self.wTree.get_widget("windowMain").set_icon_from_file(self.iconFile)
         self.wTree.get_widget("imageLogo").set_from_file(self.iconFile)
 
-        # check for existing mount dir # Proceeds without DIALOG BOX 1 input
+        # check for existing mount dir
         print "Check for existing mount directory" 
         if os.path.exists(self.mountDir) == False:
             print _('INFO: Creating mount directory...')
             os.makedirs(self.mountDir)
 
         # set app title
-        print "Set app title" # Proceeds without DIALOG BOX 1 input
+        print "Set app title"
         self.wTree.get_widget("windowMain").set_title(self.appName)
 
         # hide back button initially
-        print "Hide back button initially" # Proceeds without DIALOG BOX 1 input
+        print "Hide back button initially"
         self.wTree.get_widget("buttonBack").hide()
         
         # set values
-        print "Set values" # Proceeds without DIALOG BOX 1 input
+        print "Set values of currentProject"
         if os.path.exists(os.environ['HOME'] + "/.linuxmint/mintConstructor/currentProject"):
             currentProject = commands.getoutput("cat ~/.linuxmint/mintConstructor/currentProject")
         else:

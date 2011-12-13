@@ -1,0 +1,8 @@
+DIALOG BOX 1: Select existing project or new project.  (Selected existing project, LMDE GNOME ISO.)
+DIALOG BOX 1.1: Continue?  This may take a few minutes.  Select yes or no.
+DIALOG BOX 2: Open a chroot terminal.
+DIALOG BOX 2.1: chroot command line terminal
+DIALOG BOX 2.2: Open a chroot terminal, or select Back or Next.
+DIALOG BOX 3: Build step, provide filename and description (defaults provided), select Back or Next.
+DIALOG BOX 3.1: Build live CD?  This may take a few minutes.  Select yes or no.
+DIALOG BOX 4: Finished
