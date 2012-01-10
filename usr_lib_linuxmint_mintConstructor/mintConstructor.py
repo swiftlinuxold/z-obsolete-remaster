@@ -9,6 +9,7 @@ import gettext
 import re
 import commands
 import datetime
+import pwd # Needed to obtain username (not root)
 
 try:
     import pygtk
@@ -29,7 +30,7 @@ except Exception, detail:
 class Reconstructor:
 
     def __init__(self):
-        # vars
+        # vars (from Linux Mint)
         self.gladefile = '/usr/lib/linuxmint/mintConstructor/mintConstructor.glade'
         self.iconFile = '/usr/lib/linuxmint/mintConstructor/icon.png'
 
@@ -37,9 +38,9 @@ class Reconstructor:
         self.mountDir = '/media/cdrom'
         self.tmpDir = "tmp"
         self.tmpPackageDir = "tmp_packages"
-        self.customDir = ""
-        self.createNewProject = False        
-        self.isoFilename = ""
+        # self.customDir = ""
+        # self.createNewProject = False        
+        # self.isoFilename = ""
         self.buildLiveCdFilename = ''        
         self.watch = gtk.gdk.Cursor(gtk.gdk.WATCH)
         self.working = None
@@ -53,572 +54,74 @@ class Reconstructor:
         self.f = sys.stdout
         self.treeModel = None
         self.treeView = None
-
-        APPDOMAIN='reconstructor'
-        LANGDIR='lang'
-        # locale
-        locale.setlocale(locale.LC_ALL, '')
-        gettext.bindtextdomain(APPDOMAIN, LANGDIR)
-        gtk.glade.bindtextdomain(APPDOMAIN, LANGDIR)
-        gtk.glade.textdomain(APPDOMAIN)
-        gettext.textdomain(APPDOMAIN)
-        gettext.install(APPDOMAIN, LANGDIR, unicode=1)
-
-        # i18n for menu item
-        menuName = _("Live Remastering Tool")
-        menuComment = _("Make changes to an ISO or a live media")
-
-        # setup glade widget tree
-        print ""
-        print "Setting up the GUI..."
-        self.wTree = gtk.glade.XML(self.gladefile, domain='reconstructor')
-        print ""
-        print ""
-
-
-        # check for user
-        if os.getuid() != 0 :
-            self.wTree.get_widget("windowMain").hide()
-
-        # create signal dictionary and connect
-        dic = { "on_buttonNext_clicked" : self.on_buttonNext_clicked,
-            "on_buttonBack_clicked" : self.on_buttonBack_clicked,
-            "on_buttonBrowseWorkingDir_clicked" : self.on_buttonBrowseWorkingDir_clicked,
-            "on_buttonBrowseIsoFilename_clicked" : self.on_buttonBrowseIsoFilename_clicked,            
-            "on_buttonBrowseLiveCdFilename_clicked" : self.on_buttonBrowseLiveCdFilename_clicked,            
-            "on_buttonInteractiveEditLaunch_clicked" : self.on_buttonInteractiveEditLaunch_clicked,
-            "on_buttonInteractiveClear_clicked" : self.on_buttonInteractiveClear_clicked,
-            "on_buttonCustomizeLaunchTerminal_clicked" : self.on_buttonCustomizeLaunchTerminal_clicked,
-            "on_buttonBurnIso_clicked" : self.on_buttonBurnIso_clicked,
-            "on_windowMain_delete_event" : gtk.main_quit,
-            "on_windowMain_destroy" : self.exitApp }
-        self.wTree.signal_autoconnect(dic)
-
-        # set icons & logo
-        self.wTree.get_widget("windowMain").set_icon_from_file(self.iconFile)
-        self.wTree.get_widget("imageLogo").set_from_file(self.iconFile)
-
-        # check for existing mount dir
-        if os.path.exists(self.mountDir) == False:
-            print _('INFO: Creating mount directory...')
-            os.makedirs(self.mountDir)
-
-        # set app title
-        self.wTree.get_widget("windowMain").set_title(self.appName)
-
-        # hide back button initially
-        self.wTree.get_widget("buttonBack").hide()
         
-        # set values
-        if os.path.exists(os.environ['HOME'] + "/.linuxmint/mintConstructor/currentProject"):
-            currentProject = commands.getoutput("cat ~/.linuxmint/mintConstructor/currentProject")
-        else:
-            currentProject = os.environ['HOME']
-        if os.path.exists(os.path.join(self.customDir, "iso_name")):
-            iso_name = commands.getoutput("cat %s/iso_name" % self.customDir)
-        else:
-            iso_name = "Linux Mint <VERSION> <EDITION> <XX>-bit"
-            
-        self.wTree.get_widget("entryWorkingDir").set_text(currentProject)        
-        self.wTree.get_widget("entryLiveCdDescription").set_text(iso_name)                         
+        # Variables (for Swift Linux)
+        self.isoFilename = '/mnt/host/linuxmint-201109-gnome-dvd-32bit.iso'
+        self.createNewProject = True
+        self.customDir = '/usr/local/bin/swiftconstructor'
+        self.userName = pwd.getpwuid(1000)[0] # username
+        self.swiftSource = '/home/' + self.userName + '/develop'
+        self.swiftDest = self.customDir + '/usr/local/bin/develop'
+        self.isoOutput = '/mnt/host/regular.iso'
+        
+        # Automatically mount /mnt/host
+        self.auto_mount() 
+        
+        # If the base ISO file cannot be found, 
+        while os.path.exists(self.isoFilename) == False:
+			self.get_iso()
+		
+		# Copies the contents of the ISO file into self.customDir
+        self.setupWorkingDirectory()
+        
+        # Copy Swift Linux scripts to chroot environment
+        # In the chroot environment, the Swift Linux scripts will be at /usr/local/bin/develop
+        self.copySwiftScripts()
+        
+        # launchTerminal function contains chroot
+        # Swift Linux bypasses the terminal window
+        # chroot command is "chroot /usr/local/bin/swiftconstructor/custom_root/"
+        self.goChroot()
+        
+        # Delete Swift Linux scripts from the chroot environment
+        self.deleteSwiftScripts()
+        
+        self.finish() # End of program
 
-    def checkCustomDir(self):
-        if self.customDir == "":
-            return False
-        else:
-            if os.path.exists(self.customDir) == False:
-                os.makedirs(self.customDir)
-            return True
-
-    def setPage(self, pageNum):
-        self.wTree.get_widget("notebookWizard").set_current_page(pageNum)
-
-    def setBusyCursor(self):
-        self.working = True
-        self.wTree.get_widget("windowMain").window.set_cursor(gtk.gdk.Cursor(gtk.gdk.WATCH))
-
-    def setDefaultCursor(self):
-        self.working = False
-        self.wTree.get_widget("windowMain").window.set_cursor(None)
-
-    def showWorking(self):
-        self.workingDlg = gtk.Dialog(title="Working")
-        self.workingDlg.set_modal(True)
-        self.workingDlg.show()
-
-    def hideWorking(self):
-        self.workingDlg.hide()
-
-    def checkWorkingDir(self):
-        # check for existing directories; if not warn...
-        remasterExists = None
-        rootExists = None
-        if os.path.exists(os.path.join(self.customDir, "remaster")) == False:
-            if self.wTree.get_widget("radiobutton_new_project").get_active() == False:
-                remasterExists = False
-        if os.path.exists(os.path.join(self.customDir, "root")) == False:
-            if self.wTree.get_widget("radiobutton_new_project").get_active() == False:
-                rootExists = False
-        workingDirOk = True
-        if remasterExists == False:
-            workingDirOk = False
-        if rootExists == False:
-            workingDirOk = False
-        if workingDirOk == False:
-            warnDlg = gtk.Dialog(title=self.appName, parent=None, flags=0, buttons=(gtk.STOCK_OK, gtk.RESPONSE_OK))
-            warnDlg.set_icon_from_file(self.iconFile)
-            warnDlg.vbox.set_spacing(10)
-            labelSpc = gtk.Label(" ")
-            warnDlg.vbox.pack_start(labelSpc)
-            labelSpc.show()
-            lblWarningText = _("  <b>Please fix the errors below before continuing.</b>   ")
-            lblRemasterText = _("  There is no remaster directory.  Please select create remaster option.  ")
-            lblRootText = _("  There is no root directory.  Please select create root option.  ")
-            labelWarning = gtk.Label(lblWarningText)
-            labelRemaster = gtk.Label(lblRemasterText)
-            labelRoot = gtk.Label(lblRootText)
-
-            labelWarning.set_use_markup(True)
-            labelRemaster.set_use_markup(True)
-            labelRoot.set_use_markup(True)
-            warnDlg.vbox.pack_start(labelWarning)
-            warnDlg.vbox.pack_start(labelRemaster)
-            warnDlg.vbox.pack_start(labelRoot)
-            labelWarning.show()
-
-            if remasterExists == False:
-                labelRemaster.show()
-            if rootExists == False:
-                labelRoot.show()
-
-            #warnDlg.show()
-            response = warnDlg.run()
-            # HACK: return False no matter what
-            if response == gtk.RESPONSE_OK:
-                warnDlg.destroy()
-            else:
-                warnDlg.destroy()
-
-        return workingDirOk
-
-    def checkPage(self, pageNum):
-        if pageNum == self.pageLiveSetup:
-            # setup
-            self.saveSetupInfo()
-            # reset interactive edit
-            self.interactiveEdit = False
-            # check for custom dir
-            if self.checkCustomDir() == True:
-                if self.createNewProject == True:
-                    if self.checkWorkingDir() == True:
-                        warnDlg = gtk.Dialog(title=self.appName, parent=None, flags=0, buttons=    (gtk.STOCK_NO, gtk.RESPONSE_CANCEL, gtk.STOCK_YES, gtk.RESPONSE_OK))
-                        warnDlg.set_icon_from_file(self.iconFile)
-                        warnDlg.vbox.set_spacing(10)
-                        labelSpc = gtk.Label(" ")
-                        warnDlg.vbox.pack_start(labelSpc)
-                        labelSpc.show()
-                        lblContinueText = _("  <b>Continue?</b>  ")
-                        lblContinueInfo = _("     This may take a few minutes.  Please wait...     ")
-                        label = gtk.Label(lblContinueText)
-                        lblInfo = gtk.Label(lblContinueInfo)
-                        label.set_use_markup(True)
-                        warnDlg.vbox.pack_start(label)
-                        warnDlg.vbox.pack_start(lblInfo)
-                        lblInfo.show()
-                        label.show()
-                        #warnDlg.show()
-                        response = warnDlg.run()
-                        if response == gtk.RESPONSE_OK:
-                            warnDlg.destroy()
-                            self.setBusyCursor()
-                            gobject.idle_add(self.setupWorkingDirectory)
-                            # calculate iso size
-                            gobject.idle_add(self.readyUp)
-                            #self.readyUp()
-                            return True
-                        else:
-                            warnDlg.destroy()
-                            return False
-                    else:
-                        return False
-                else:
-                    if self.checkWorkingDir() == True:
-                        self.setBusyCursor()
-                        # calculate iso size in the background
-                        gobject.idle_add(self.readyUp)
-                        #self.readyUp()
-                        return True
-                    else:
-                        return False
-            else:
-                warnDlg = gtk.Dialog(title=self.appName, parent=None, flags=0, buttons=(gtk.STOCK_OK, gtk.RESPONSE_OK))
-                warnDlg.set_icon_from_file(self.iconFile)
-                warnDlg.vbox.set_spacing(10)
-                labelSpc = gtk.Label(" ")
-                warnDlg.vbox.pack_start(labelSpc)
-                labelSpc.show()
-                lblWorkingDirText = _("  <b>You must enter a working directory.</b>  ")
-                label = gtk.Label(lblWorkingDirText)
-                #lblInfo = gtk.Label("     This may take a few minutes.  Please     wait...     ")
-                label.set_use_markup(True)
-                warnDlg.vbox.pack_start(label)
-                #warnDlg.vbox.pack_start(lblInfo)
-                #lblInfo.show()
-                label.show()
-                #warnDlg.show()
-                response = warnDlg.run()
-                # HACK: return False no matter what
-                if response == gtk.RESPONSE_OK:
-                    warnDlg.destroy()
-                    return False
-                else:
-                    warnDlg.destroy()
-                    return False
-        elif pageNum == self.pageLiveCustomize:
-            d = datetime.datetime.now()
-            filename = d.strftime("dev-%Y%m%d-%H%M") + ".iso"
-            self.wTree.get_widget("entryLiveIsoFilename").set_text(self.customDir + "/" + filename)
-
-            if os.path.exists(os.path.join(self.customDir, "iso_name")):
-                iso_name = commands.getoutput("cat %s/iso_name" % self.customDir)
-            else:
-                iso_name = "Linux Mint <VERSION> <EDITION> <XX>-bit"
-            self.wTree.get_widget("entryLiveCdDescription").set_text(iso_name)
-            self.setPage(self.pageLiveBuild)
-            self.checkEnableBurnIso()
-            return True
-
-        elif pageNum == self.pageLiveBuild:
-            # build
-            warnDlg = gtk.Dialog(title=self.appName, parent=None, flags=0, buttons=(gtk.STOCK_NO, gtk.RESPONSE_CANCEL, gtk.STOCK_YES, gtk.RESPONSE_OK))
-            warnDlg.set_icon_from_file(self.iconFile)
-            warnDlg.vbox.set_spacing(10)
-            labelSpc = gtk.Label(" ")
-            warnDlg.vbox.pack_start(labelSpc)
-            labelSpc.show()
-            lblBuildText = _("  <b>Build Live CD?</b>  ")
-            lblBuildInfo = _("     This may take a few minutes.  Please wait...     ")
-            label = gtk.Label(lblBuildText)
-            lblInfo = gtk.Label(lblBuildInfo)
-            label.set_use_markup(True)
-            warnDlg.vbox.pack_start(label)
-            warnDlg.vbox.pack_start(lblInfo)
-            lblInfo.show()
-            label.show()
-            #warnDlg.show()
-            response = warnDlg.run()
-            if response == gtk.RESPONSE_OK:
-                warnDlg.destroy()
-                self.setBusyCursor()
-                gobject.idle_add(self.build)
-                # change Next text to Finish
-                self.wTree.get_widget("buttonNext").set_label("Finish")
-                return True
-            else:
-                warnDlg.destroy()
-                return False
-
-        elif pageNum == self.pageFinish:
-            # finished... exit
-            print _("Exiting...")
-            gtk.main_quit()
-            sys.exit(0)
-
-    def checkEnableBurnIso(self):
-        # show burn iso button if nautilus-cd-burner exists
-        if commands.getoutput('which nautilus-cd-burner') != '':
-            # make sure iso isn't blank
-            if os.path.exists(self.wTree.get_widget("entryLiveIsoFilename").get_text()):
-                self.wTree.get_widget("buttonBurnIso").show()
-            else:
-                self.wTree.get_widget("buttonBurnIso").hide()
-        else:
-            self.wTree.get_widget("buttonBurnIso").hide()
-
-
-    def exitApp(self):
-        gtk.main_quit()
-        sys.exit(0)
-
-
-    # launch chroot terminal
-    def launchTerminal(self):
-        try:
-            # setup environment
-            # copy dns info
-            print _("Copying DNS info...")
-            os.popen('cp -f /etc/resolv.conf ' + os.path.join(self.customDir, "root/etc/resolv.conf"))
-            # mount /proc
-            print _("Mounting /proc filesystem...")
-            os.popen('mount --bind /proc \"' + os.path.join(self.customDir, "root/proc") + '\"')
-            # copy apt.conf
-            #print _("Copying apt.conf configuration...")
-            #os.popen('cp -f /etc/apt/apt.conf ' + os.path.join(self.customDir, "root/etc/apt/apt.conf"))
-            # copy wgetrc
-            print _("Copying wgetrc configuration...")
-            # backup
-            os.popen('mv -f \"' + os.path.join(self.customDir, "root/etc/wgetrc") + '\" \"' + os.path.join(self.customDir, "root/etc/wgetrc.orig") + '\"')
-            os.popen('cp -f /etc/wgetrc ' + os.path.join(self.customDir, "root/etc/wgetrc"))
-            # HACK: create temporary script for chrooting
-            scr = '#!/bin/sh\n#\n#\t(c) reconstructor, 2006\n#\nchroot ' + os.path.join(self.customDir, "root/") + '\n'
-            f=open('/tmp/reconstructor-terminal.sh', 'w')
-            f.write(scr)
-            f.close()
-            os.popen('chmod a+x ' + os.path.join(self.customDir, "/tmp/reconstructor-terminal.sh"))
-            # TODO: replace default terminal title with "Reconstructor Terminal"
-            # use gnome-terminal if available -- more features
-            #if commands.getoutput('which gnome-terminal') != '':
-            #   print _('Launching Gnome-Terminal for advanced customization...')
-            #   os.popen('export HOME=/root ; gnome-terminal --hide-menubar -t \"Reconstructor Terminal\" -e \"/tmp/reconstructor-terminal.sh\"')
-            if commands.getoutput('which x-terminal-emulator') != '':
-                print _('Launching Xterm for advanced customization...')
-                # use x-terminal-emulator if xterm isn't available
-                if os.path.exists("/usr/bin/xterm"):
-                    os.popen('export HOME=/root ; xterm -bg black -fg white -rightbar -title \"%s\" -e /tmp/reconstructor-terminal.sh' % self.folder)
-                else:
-                    os.popen('export HOME=/root ; x-terminal-emulator -e /tmp/reconstructor-terminal.sh')
-            else:
-                print _('Error: no valid terminal found')
-                gtk.main_quit()
-                sys.exit(1)
-
-            # restore wgetrc
-            print _("Restoring wgetrc configuration...")
-            os.popen('mv -f \"' + os.path.join(self.customDir, "root/etc/wgetrc.orig") + '\" \"' + os.path.join(self.customDir, "root/etc/wgetrc") + '\"')
-            # remove apt.conf
-            #print _("Removing apt.conf configuration...")
-            #os.popen('rm -Rf \"' + os.path.join(self.customDir, "root/etc/apt/apt.conf") + '\"')
-            # remove dns info
-            print _("Removing DNS info...")
-            os.popen('rm -Rf \"' + os.path.join(self.customDir, "root/etc/resolv.conf") + '\"')
-            # umount /proc
-            print _("Umounting /proc...")
-            os.popen('umount \"' + os.path.join(self.customDir, "root/proc/") + '\"')
-            # remove temp script
-            os.popen('rm -Rf /tmp/reconstructor-terminal.sh')
-
-        except Exception, detail:
-            # restore settings
-            # restore wgetrc
-            print _("Restoring wgetrc configuration...")
-            os.popen('mv -f \"' + os.path.join(self.customDir, "root/etc/wgetrc.orig") + '\" \"' + os.path.join(self.customDir, "root/etc/wgetrc") + '\"')
-            # remove apt.conf
-            #print _("Removing apt.conf configuration...")
-            #os.popen('rm -Rf \"' + os.path.join(self.customDir, "root/etc/apt/apt.conf") + '\"')
-            # remove dns info
-            print _("Removing DNS info...")
-            os.popen('rm -Rf \"' + os.path.join(self.customDir, "root/etc/resolv.conf") + '\"')
-            # umount /proc
-            print _("Umounting /proc...")
-            os.popen('umount \"' + os.path.join(self.customDir, "root/proc/") + '\"')
-            # remove temp script
-            os.popen('rm -Rf /tmp/reconstructor-terminal.sh')
-
-            errText = _('Error launching terminal: ')
-            print errText, detail
-            pass
-
+# Automatically mount /mnt/host
+    def auto_mount(self):
+        os.system ("umount -t vboxsf guest /mnt/host")
+        os.system ("mount -t vboxsf guest /mnt/host")
         return
-
-    # Burns ISO
-    def burnIso(self):
-        try:
-            if commands.getoutput('which nautilus-cd-burner') != '':
-                print _('Burning ISO...')
-                os.popen('nautilus-cd-burner --source-iso=\"' + self.buildLiveCdFilename + '\"')
-            else:
-                print _('Error: nautilus-cd-burner is needed for burning iso files... ')
-
-        except Exception, detail:
-            errText = _('Error burning ISO: ')
-            print errText, detail
-            pass
-
-
-    def readyUp(self):
-        try:                                        
-            self.setDefaultCursor()
-            self.setPage(self.pageLiveCustomize)
-        except Exception, detail:            
-            print detail
-            pass
-
-    def startInteractiveEdit(self):
-        print _('Beginning Interactive Editing...')
-        # set interactive edit tag
-        self.interactiveEdit = True
-        # check for template user home directory; create if necessary
-        #print ('useradd -d /home/reconstructor -m -s /bin/bash -p ' + str(os.urandom(8)))
-        if os.path.exists('/home/reconstructor') == False:
-            # create user with random password
-            password = 'r0714'
-            os.popen('useradd -d /home/reconstructor -s /bin/bash -p ' + password +' reconstructor')
-            # create home dir
-            os.popen('mkdir -p /home/reconstructor')
-            # change owner of home
-            os.popen('chown -R reconstructor /home/reconstructor')
-        # launch Xnest in background
-        try:
-            print _('Starting Xnest in the background...')
-            os.popen('Xnest :1 -ac -once & 1>&2 2>/dev/null')
-        except Exception, detail:
-            errXnest = _("Error starting Xnest: ")
-            print errXnest, detail
-            return
-        # try to start gnome-session with template user
-        try:
-            print _('Starting Gnome-Session....')
-            #os.popen('chroot \"' + os.path.join(self.customDir, "root/") + '\" ' + 'su -c \"export DISPLAY=localhost:1 ; gnome-session\" 1>&2 2>/dev/null\"')
-            #os.popen("chroot /home/ehazlett/reconstructor/root \"/tmp/test.sh\"")
-            os.popen('su reconstructor -c \"export DISPLAY=:1 ; gnome-session\" 1>&2 2>/dev/null')
-        except Exception, detail:
-            errGnome = _("Error starting Gnome-Session: ")
-            print errGnome, detail
-            return
-
-    def clearInteractiveSettings(self):
-        try:
-            print _('Clearing Interactive Settings...')
-            print _('Removing \'reconstructor\' user...')
-            os.popen('userdel reconstructor')
-            print _('Removing \'reconstructor\' home directory...')
-            os.popen('rm -Rf /home/reconstructor')
-            self.setDefaultCursor()
-        except Exception, detail:
-            self.setDefaultCursor()
-            errText = _('Error clearing interactive settings: ')
-            print errText, detail
-            pass
-
-    def on_buttonBack_clicked(self, widget):
-        # HACK: back pressed so change buttonNext text
-        self.wTree.get_widget("buttonNext").set_label("Next")
-        # HACK: get_current_page() returns after the click, so check for 1 page ahead
-        # check for first step; disable if needed
-        if self.wTree.get_widget("notebookWizard").get_current_page() == 0:
-            self.wTree.get_widget("buttonBack").hide()
-        # check for disc type and move to proper locations
-        elif self.wTree.get_widget("notebookWizard").get_current_page() == self.pageFinish:
-            self.setPage(self.pageLiveBuild)
-        else:
-            self.wTree.get_widget("notebookWizard").prev_page()
-
-    def on_buttonNext_clicked(self, widget):
-        page = self.wTree.get_widget("notebookWizard").get_current_page()
-        # HACK: show back button
-        self.wTree.get_widget("buttonBack").show()
-        #if (self.checkPage(page)):
-        #    self.wTree.get_widget("notebookWizard").next_page()
-        self.checkPage(page)
-
-    def on_buttonBrowseWorkingDir_clicked(self, widget):
-        dlgTitle = _('Select Working Directory')
-        workingDlg = gtk.FileChooserDialog(title=dlgTitle, parent=self.wTree.get_widget("windowMain"), action=gtk.FILE_CHOOSER_ACTION_SELECT_FOLDER, buttons=(gtk.STOCK_CANCEL, gtk.RESPONSE_CANCEL, gtk.STOCK_OPEN, gtk.RESPONSE_OK), backend=None)
-        workingDlg.set_uri(os.environ['HOME'] + '/reconstructor')
-        response = workingDlg.run()
-        if response == gtk.RESPONSE_OK :
-            filename = workingDlg.get_current_folder()
-            self.wTree.get_widget("entryWorkingDir").set_text(workingDlg.get_filename())
-            workingDlg.hide()
-        elif response == gtk.RESPONSE_CANCEL :
-            workingDlg.destroy()
-
-    def on_buttonBrowseIsoFilename_clicked(self, widget):
-        # filter only iso files
-        isoFilter = gtk.FileFilter()
-        isoFilter.set_name("ISO Files (.iso)")
-        isoFilter.add_pattern("*.iso")
-        # create dialog
-        dlgTitle = _('Select Live CD ISO')
-        isoDlg = gtk.FileChooserDialog(title=dlgTitle, parent=self.wTree.get_widget("windowMain"), action=gtk.FILE_CHOOSER_ACTION_OPEN, buttons=(gtk.STOCK_CANCEL, gtk.RESPONSE_CANCEL, gtk.STOCK_OPEN, gtk.RESPONSE_OK), backend=None)
-        isoDlg.add_filter(isoFilter)
-        isoDlg.set_current_folder(os.environ['HOME'])
-        response = isoDlg.run()
-        if response == gtk.RESPONSE_OK :
-            self.wTree.get_widget("entryIsoFilename").set_text(isoDlg.get_filename())
-            isoDlg.hide()
-        elif response == gtk.RESPONSE_CANCEL :
-            isoDlg.destroy()
-
-    def on_buttonBrowseLiveCdFilename_clicked(self, widget):
-        # filter only iso files
-        isoFilter = gtk.FileFilter()
-        isoFilter.set_name("ISO Files")
-        isoFilter.add_pattern("*.iso")
-        # create dialog
-        dlgTitle = _('Select Live CD Filename')
-        isoDlg = gtk.FileChooserDialog(title=dlgTitle, parent=self.wTree.get_widget("windowMain"), action=gtk.FILE_CHOOSER_ACTION_SAVE, buttons=(gtk.STOCK_CANCEL, gtk.RESPONSE_CANCEL, gtk.STOCK_SAVE, gtk.RESPONSE_OK), backend=None)
-        isoDlg.add_filter(isoFilter)
-        isoDlg.set_select_multiple(False)
-        isoDlg.set_current_folder(os.environ['HOME'])
-        response = isoDlg.run()
-        if response == gtk.RESPONSE_OK :
-            self.wTree.get_widget("entryLiveIsoFilename").set_text(isoDlg.get_filename())
-            isoDlg.hide()
-        elif response == gtk.RESPONSE_CANCEL :
-            isoDlg.destroy()    
-
-    def on_buttonInteractiveEditLaunch_clicked(self, widget):
-        self.startInteractiveEdit()
-
-    def on_buttonInteractiveClear_clicked(self, widget):
-        warnDlg = gtk.Dialog(title=self.appName, parent=None, flags=0, buttons=(gtk.STOCK_NO, gtk.RESPONSE_CANCEL, gtk.STOCK_OK, gtk.RESPONSE_OK))
-        warnDlg.set_icon_from_file(self.iconFile)
-        warnDlg.vbox.set_spacing(10)
-        labelSpc = gtk.Label(" ")
-        warnDlg.vbox.pack_start(labelSpc)
-        labelSpc.show()
-        lblContinueText = _("  <b>Delete?</b>  ")
-        label = gtk.Label(lblContinueText)
-        label.set_use_markup(True)
-        warnDlg.vbox.pack_start(label)
-        label.show()
-        #warnDlg.show()
-        response = warnDlg.run()
-        if response == gtk.RESPONSE_OK:
-            warnDlg.destroy()
-            self.setBusyCursor()
-            # clear settings
-            gobject.idle_add(self.clearInteractiveSettings)
-        else:
-            warnDlg.destroy()
-
-    def on_buttonCustomizeLaunchTerminal_clicked(self, widget):
-        self.launchTerminal()
-
-    def on_buttonBurnIso_clicked(self, widget):
-        self.burnIso()
-
-    def saveSetupInfo(self):
-        # do setup - check and create dirs as needed
-        print _("INFO: Saving working directory information...")
-        self.customDir = self.wTree.get_widget("entryWorkingDir").get_text()
-        os.system("mkdir -p ~/.linuxmint/mintConstructor")
-        os.system("echo \"" + self.customDir + "\" > ~/.linuxmint/mintConstructor/currentProject")
-        self.createNewProject = self.wTree.get_widget("radiobutton_new_project").get_active()        
-        self.isoFilename = self.wTree.get_widget("entryIsoFilename").get_text()
-        # debug
-        print "Custom Directory: " + str(self.customDir)
-        print "Create New Project: " + str(self.createNewProject)        
-        print "ISO Filename: " + str(self.isoFilename)
         
-        self.folder = self.customDir.split("/")[-1]
-        self.wTree.get_widget("windowMain").set_title("%s - %s" % (self.folder, self.appName))
+# Get the base ISO file
+    def get_iso(self):
+        print (self.isoFilename + " is missing.")
+        print ("Please copy the base ISO file to the /home/(username)/guest")
+        print ("directory in your host system.")
+        raw_input ("Press Enter to continue")
+        self.auto_mount()
+        return
 
 # ---------- Setup ---------- #
     def setupWorkingDirectory(self):
         print _("INFO: Setting up working directory...")
         # remaster dir
-        if self.createNewProject:
+        if self.createNewProject: # Executed in Swift Linux
             # check for existing directories and remove if necessary
             #if os.path.exists(os.path.join(self.customDir, "remaster")):
             #    print _("INFO: Removing existing Remaster directory...")
             #    os.popen('rm -Rf \"' + os.path.join(self.customDir, "remaster/") + '\"')
+            
+            if os.path.exists(self.customDir) == True:
+                print ("INFO: Removing old " + self.customDir )
+                shutil.rmtree(self.customDir)
+            
             if os.path.exists(os.path.join(self.customDir, "remaster")) == False:
-                print "INFO: Creating Remaster directory..."
+                print ("INFO: Creating Remaster directory at " + self.customDir )
                 os.makedirs(os.path.join(self.customDir, "remaster"))
             # check for iso
-            if self.isoFilename == "":
+            if self.isoFilename == "": # Not executed in Swift Linux
                 mntDlg = gtk.Dialog(title=self.appName, parent=None, flags=0, buttons=(gtk.STOCK_CANCEL, gtk.RESPONSE_CANCEL, gtk.STOCK_OK, gtk.RESPONSE_OK))
                 mntDlg.set_icon_from_file(self.iconFile)
                 mntDlg.vbox.set_spacing(10)
@@ -640,7 +143,7 @@ class Reconstructor:
                     mntDlg.destroy()
                     self.setDefaultCursor()
                     return
-            else:
+            else: # Executed in Swift Linux
                 print _("Using ISO for remastering...")
                 os.popen('mount -o loop \"' + self.isoFilename + '\" ' + self.mountDir)
 
@@ -653,14 +156,11 @@ class Reconstructor:
             # unmount iso/cd-rom
             os.popen("umount " + self.mountDir)
         # custom root dir
-        if self.createNewProject:
-            #if os.path.exists(os.path.join(self.customDir, "root")):
-            #    print _("INFO: Removing existing Custom Root directory...")
+        if self.createNewProject: # Executed in Swift Linux
 
-            #    os.popen('rm -Rf \"' + os.path.join(self.customDir, "root/") + '\"')
-            if os.path.exists(os.path.join(self.customDir, "root")) == False:
+            if os.path.exists(os.path.join(self.customDir, "custom_root")) == False:
                 print _("INFO: Creating Custom Root directory...")
-                os.makedirs(os.path.join(self.customDir, "root"))
+                os.makedirs(os.path.join(self.customDir, "custom_root"))
             # check for existing directories and remove if necessary
             if os.path.exists(os.path.join(self.customDir, "tmpsquash")):
                 print _("INFO: Removing existing tmpsquash directory...")
@@ -669,7 +169,7 @@ class Reconstructor:
 
             # extract squashfs into custom root
             # check for iso
-            if self.isoFilename == "":
+            if self.isoFilename == "": # Not executed in Swift Linux
                 mntDlg = gtk.Dialog(title=self.appName, parent=None, flags=0, buttons=(gtk.STOCK_CANCEL, gtk.RESPONSE_CANCEL, gtk.STOCK_OK, gtk.RESPONSE_OK))
                 mntDlg.set_icon_from_file(self.iconFile)
                 mntDlg.vbox.set_spacing(10)
@@ -690,7 +190,7 @@ class Reconstructor:
                     mntDlg.destroy()
                     self.setDefaultCursor()
                     return
-            else:
+            else: # Executed in Swift Linux
                 print _("Using ISO for squashfs root...")
                 os.popen('mount -o loop \"' + self.isoFilename + '\" ' + self.mountDir)
 
@@ -702,7 +202,7 @@ class Reconstructor:
             print _("Extracting squashfs root...")
 
             # copy squashfs root
-            os.popen('rsync -at --del \"' + os.path.join(self.customDir, "tmpsquash") + '\"/ \"' + os.path.join(self.customDir, "root/") + '\"')
+            os.popen('rsync -at --del \"' + os.path.join(self.customDir, "tmpsquash") + '\"/ \"' + os.path.join(self.customDir, "custom_root/") + '\"')
 
             # umount tmpsquashfs
             print _("Unmounting tmpsquash...")
@@ -715,19 +215,101 @@ class Reconstructor:
             os.popen('rm -Rf \"' + os.path.join(self.customDir, "tmpsquash") + '\"')
             # set proper permissions - MUST DO WITH UBUNTU
             print _("Setting proper permissions...")
-            os.popen('chmod 6755 \"' + os.path.join(self.customDir, "root/usr/bin/sudo") + '\"')
-            os.popen('chmod 0440 \"' + os.path.join(self.customDir, "root/etc/sudoers") + '\"')
+            os.popen('chmod 6755 \"' + os.path.join(self.customDir, "custom_root/usr/bin/sudo") + '\"')
+            os.popen('chmod 0440 \"' + os.path.join(self.customDir, "custom_root/etc/sudoers") + '\"')
             print _("Finished extracting squashfs root...")
-            if os.path.exists("/usr/bin/aplay"):
-                os.system("/usr/bin/aplay /usr/lib/linuxmint/mintConstructor/done.wav")
 
         # load comboboxes for customization
         #self.hideWorking()
-        self.setDefaultCursor()
-        self.setPage(self.pageLiveCustomize)
+        # self.setDefaultCursor()
+        # self.setPage(self.pageLiveCustomize)
         print _("Finished setting up working directory...")
         print " "
         return False
+
+    # Copy Swift Linux scripts to chroot environment
+    # In the chroot environment, the Swift Linux scripts will be at /usr/local/bin/develop
+    def copySwiftScripts(self):
+        # From earlier:
+        # self.swiftSource = "/home/" + self.userName + "/develop"
+        # self.swiftDest = self.customDir + "/usr/local/bin/develop"
+        print ("BEGIN copying Swift Linux scripts to the chroot environment")
+        shutil.copytree (self.swiftSource, self.swiftDest)
+        print ("FINISHED copying Swift Linux scripts to the chroot environment")
+        return
+
+    # Delete Swift Linux scripts from chroot environment
+    # In the chroot environment, the Swift Linux scripts are at /usr/local/bin/develop
+    def deleteSwiftScripts(self):
+        # From earlier:
+        # self.swiftDest = self.customDir + "/usr/local/bin/develop"
+        print ("BEGIN deleting Swift Linux scripts from the chroot environment")
+        shutil.rmtree(self.swiftDest)
+        print ("FINISHED deleting Swift Linux scripts from the chroot environment")
+        return
+		
+
+    # launch chroot terminal
+    def goChroot(self):
+        try:
+            # setup environment
+            # copy dns info
+            print _("Try: Copying DNS info...")
+            os.popen('cp -f /etc/resolv.conf ' + os.path.join(self.customDir, "custom_root/etc/resolv.conf"))
+            # mount /proc
+            print _("Try: Mounting /proc filesystem...")
+            os.popen('mount --bind /proc \"' + os.path.join(self.customDir, "custom_root/proc") + '\"')
+            # copy apt.conf
+            #print _("Copying apt.conf configuration...")
+            #os.popen('cp -f /etc/apt/apt.conf ' + os.path.join(self.customDir, "custom_root/etc/apt/apt.conf"))
+            # copy wgetrc
+            print _("Try: Copying wgetrc configuration...")
+            # backup
+            os.popen('mv -f \"' + os.path.join(self.customDir, "custom_root/etc/wgetrc") + '\" \"' + os.path.join(self.customDir, "custom_root/etc/wgetrc.orig") + '\"')
+            os.popen('cp -f /etc/wgetrc ' + os.path.join(self.customDir, "custom_root/etc/wgetrc"))
+            
+            # Execute "chroot /usr/local/bin/swiftconstructor/custom_root"
+            # From earlier: self.customDir = "/usr/local/bin/swiftconstructor"
+            os.system('chroot ' + self.customDir + '/custom_root')
+            os.system('sh /usr/local/bin/develop/1-build/shared-regular.sh')
+            os.system('exit')
+            
+            # restore wgetrc
+            print _("Restoring wgetrc configuration...")
+            os.popen('mv -f \"' + os.path.join(self.customDir, "root/etc/wgetrc.orig") + '\" \"' + os.path.join(self.customDir, "root/etc/wgetrc") + '\"')
+            # remove apt.conf
+            #print _("Removing apt.conf configuration...")
+            #os.popen('rm -Rf \"' + os.path.join(self.customDir, "root/etc/apt/apt.conf") + '\"')
+            # remove dns info
+            print _("Removing DNS info...")
+            os.popen('rm -Rf \"' + os.path.join(self.customDir, "root/etc/resolv.conf") + '\"')
+            # umount /proc
+            print _("Umounting /proc...")
+            os.popen('umount \"' + os.path.join(self.customDir, "root/proc/") + '\"')
+
+        except Exception, detail: # Not used in Swift Linux
+            # restore settings
+            # restore wgetrc
+            print _("Except: Restoring wgetrc configuration...")
+            os.popen('mv -f \"' + os.path.join(self.customDir, "custom_root/etc/wgetrc.orig") + '\" \"' + os.path.join(self.customDir, "custom_root/etc/wgetrc") + '\"')
+            # remove apt.conf
+            #print _("Removing apt.conf configuration...")
+            #os.popen('rm -Rf \"' + os.path.join(self.customDir, "custom_root/etc/apt/apt.conf") + '\"')
+            # remove dns info
+            print _("Except: Removing DNS info...")
+            os.popen('rm -Rf \"' + os.path.join(self.customDir, "custom_root/etc/resolv.conf") + '\"')
+            # umount /proc
+            print _("Except: Umounting /proc...")
+            os.popen('umount \"' + os.path.join(self.customDir, "custom_root/proc/") + '\"')
+            # remove temp script
+            os.popen('rm -Rf /tmp/reconstructor-terminal.sh')
+
+            errText = _('Error launching terminal: ')
+            print errText, detail
+            pass
+
+        return
+
 
 # ---------- Build ---------- #
     def build(self):
@@ -770,11 +352,11 @@ class Reconstructor:
         print " "
 
         # build squash root                
-        if os.path.exists(os.path.join(self.customDir, "root")):
+        if os.path.exists(os.path.join(self.customDir, "custom_root")):
             print _("Creating SquashFS root...")
             print _("Updating File lists...")
             q = ' dpkg-query -W --showformat=\'${Package} ${Version}\n\' '
-            os.popen('chroot \"' + os.path.join(self.customDir, "root/") + '\"' + q + ' > \"' + os.path.join(self.customDir, "remaster/casper/filesystem.manifest") + '\"' )
+            os.popen('chroot \"' + os.path.join(self.customDir, "custom_root/") + '\"' + q + ' > \"' + os.path.join(self.customDir, "remaster/casper/filesystem.manifest") + '\"' )
             os.popen('cp -f \"' + os.path.join(self.customDir, "remaster/casper/filesystem.manifest") + '\" \"' + os.path.join(self.customDir, "remaster/casper/filesystem.manifest-desktop") + '\"')
             # check for existing squashfs root
             if os.path.exists(os.path.join(self.customDir, "remaster/casper/filesystem.squashfs")):
@@ -783,9 +365,9 @@ class Reconstructor:
             print _("Building SquashFS root...")
             # check for alternate mksquashfs
             if mksquashfs == '':
-                os.system('mksquashfs \"' + os.path.join(self.customDir, "root/") + '\"' + ' \"' + os.path.join(self.customDir, "remaster/casper/filesystem.squashfs") + '\"')
+                os.system('mksquashfs \"' + os.path.join(self.customDir, "custom_root/") + '\"' + ' \"' + os.path.join(self.customDir, "remaster/casper/filesystem.squashfs") + '\"')
             else:
-                os.system(mksquashfs + ' \"' + os.path.join(self.customDir, "root/") + '\"' + ' \"' + os.path.join(self.customDir, "remaster/casper/filesystem.squashfs") + '\"')
+                os.system(mksquashfs + ' \"' + os.path.join(self.customDir, "custom_root/") + '\"' + ' \"' + os.path.join(self.customDir, "remaster/casper/filesystem.squashfs") + '\"')
 
         # build iso       
         if os.path.exists(os.path.join(self.customDir, "remaster")):
@@ -838,6 +420,13 @@ class Reconstructor:
         print "Build Complete..."
         if os.path.exists("/usr/bin/aplay"):
             os.system("/usr/bin/aplay /usr/lib/linuxmint/mintConstructor/done.wav")
+                    
+    def finish(self):
+        # finished... exit
+        print ("Exiting...")
+        sys.exit(0)
+
+
 
 # ---------- MAIN ----------
 
